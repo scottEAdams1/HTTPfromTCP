@@ -1,19 +1,17 @@
 package main
 
 import (
-	"errors"
+	"HTTPfromTCP/internal/request"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
 )
 
 func main() {
 	port := ":42069"
 	listener, err := net.Listen("tcp", port)
 	if err != nil {
-		log.Fatal("Failed to open listener on port %s. Error: %s\n", port, err.Error())
+		log.Fatalf("Failed to open listener on port %s. Error: %s\n", port, err.Error())
 	}
 	defer listener.Close()
 	fmt.Printf("Listening on port %s\n", port)
@@ -23,15 +21,23 @@ func main() {
 			log.Fatalf("Error: %s\n", err.Error())
 		}
 		fmt.Printf("Connection accepted from %s\n", conn.RemoteAddr())
-		ch := getLinesChannel(conn)
+		/*ch := getLinesChannel(conn)
 		for v := range ch {
 			fmt.Printf("%s\n", v)
+		}*/
+		req, err := request.RequestFromReader(conn)
+		if err != nil {
+			log.Fatalf("Failed to make request. Error: %s\n", err.Error())
 		}
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
 		fmt.Printf("Connection to %s closed\n", conn.RemoteAddr())
 	}
 }
 
-func getLinesChannel(f io.ReadCloser) <-chan string {
+/*func getLinesChannel(f io.ReadCloser) <-chan string {
 	ch := make(chan string)
 
 	currentLine := ""
@@ -66,4 +72,4 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 	}()
 
 	return ch
-}
+}*/
