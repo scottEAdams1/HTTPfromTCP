@@ -1,6 +1,7 @@
 package request
 
 import (
+	"HTTPfromTCP/internal/headers"
 	"errors"
 	"io"
 	"regexp"
@@ -9,7 +10,8 @@ import (
 
 type Request struct {
 	RequestLine RequestLine
-	state       int
+	Headers     headers.Headers
+	state       requestState
 }
 
 type RequestLine struct {
@@ -18,13 +20,22 @@ type RequestLine struct {
 	Method        string
 }
 
+type requestState int
+
+const (
+	requestStateInitialised requestState = iota
+	requestStateDone
+	requestStateParsingHeaders
+)
+
 const bufferSize = 8
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	buf := make([]byte, bufferSize, bufferSize)
 	readToIndex := 0
 	request := Request{
-		state: 0,
+		Headers: make(headers.Headers),
+		state:   0,
 	}
 	for request.state != 1 {
 		if readToIndex >= len(buf) {
@@ -35,7 +46,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		n, err := reader.Read(buf[readToIndex:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				request.state = 1
+				if request.state != requestStateDone {
+					return nil, errors.New("Incomplete request")
+				}
 				break
 			}
 			return nil, err
@@ -80,7 +93,22 @@ func parseRequestLine(request []byte) (RequestLine, int, error) {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.state == 0 {
+	totalBytesParsed := 0
+	for r.state != requestStateDone {
+		numBytes, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return 0, err
+		}
+		totalBytesParsed += numBytes
+		if numBytes == 0 {
+			break
+		}
+	}
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
+	if r.state == requestStateInitialised {
 		requestLine, numBytes, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
@@ -89,11 +117,20 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		r.RequestLine = requestLine
-		r.state = 1
+		r.state = requestStateParsingHeaders
 		return numBytes, nil
+	} else if r.state == requestStateParsingHeaders {
+		numBytes, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if done == true {
+			r.state = requestStateDone
+		}
+		return numBytes, err
+	} else if r.state == requestStateDone {
+		return 0, errors.New("Trying to read data in done state")
+	} else {
+		return 0, errors.New("Unknown state")
 	}
-	if r.state == 1 {
-		return 0, errors.New("Trying to read data in a done state")
-	}
-	return 0, errors.New("Unknown state")
 }
