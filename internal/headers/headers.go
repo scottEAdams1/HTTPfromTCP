@@ -42,3 +42,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	}
 	return len(strings.Split(s, "\r\n")[0]) + 2, false, nil
 }
+
+func (h Headers) Get(key string) (val string) {
+	return h[strings.ToLower(key)]
+}

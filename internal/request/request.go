@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 	state       requestState
 }
 
@@ -26,6 +28,7 @@ const (
 	requestStateInitialised requestState = iota
 	requestStateDone
 	requestStateParsingHeaders
+	requestStateParsingBody
 )
 
 const bufferSize = 8
@@ -125,9 +128,26 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, err
 		}
 		if done == true {
-			r.state = requestStateDone
+			r.state = requestStateParsingBody
 		}
 		return numBytes, err
+	} else if r.state == requestStateParsingBody {
+		if r.Headers.Get("Content-Length") == "" {
+			r.state = requestStateDone
+			return len(data), nil
+		}
+		r.Body = append(r.Body, data...)
+		length, err := strconv.Atoi(r.Headers.Get("Content-Length"))
+		if err != nil {
+			return 0, err
+		}
+		if len(r.Body) > length {
+			return 0, errors.New("Incorrect content length")
+		} else if len(r.Body) == length {
+			r.state = requestStateDone
+		}
+		return len(data), nil
+
 	} else if r.state == requestStateDone {
 		return 0, errors.New("Trying to read data in done state")
 	} else {
