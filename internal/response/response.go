@@ -3,8 +3,11 @@ package response
 import (
 	"HTTPfromTCP/internal/headers"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 type StatusCode int
@@ -56,4 +59,45 @@ func (w *Writer) GetDefaultHeaders(contentLen int) headers.Headers {
 	headers["Connection"] = "close"
 	headers["Content-Type"] = "text/html"
 	return headers
+}
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	length := len(p)
+	hex := fmt.Sprintf("%x", length)
+	n, err := w.Writer.Write([]byte(hex + "\r\n"))
+	if err != nil {
+		return n, err
+	}
+	n2, err := w.Writer.Write(p)
+	if err != nil {
+		return n + n2, err
+	}
+	n3, err := w.Writer.Write([]byte("\r\n"))
+	return n + n2 + n3, err
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	return w.Writer.Write([]byte("0\r\n\r\n"))
+}
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+	_, err := w.Writer.Write([]byte("0\r\n"))
+	if err != nil {
+		return err
+	}
+	trailers := strings.Split(h["Trailer"], ",")
+	for k, v := range h {
+		if slices.Contains(trailers, k) {
+			trailer := fmt.Sprintf("%s: %s\r\n", k, v)
+			_, err = w.Writer.Write([]byte(trailer))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	_, err = w.Writer.Write([]byte("\r\n"))
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -4,9 +4,15 @@ import (
 	"HTTPfromTCP/internal/request"
 	"HTTPfromTCP/internal/response"
 	"bytes"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -72,8 +78,47 @@ func (s *Server) handle(conn net.Conn) {
 		writer2.WriteBody([]byte(body))
 		return
 	}
-	s.handler(&writer2, req)
+
+	if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin") {
+		proxyHandler(&writer2, req)
+	} else {
+		s.handler(&writer2, req)
+	}
 	conn.Write(buf.Bytes())
+}
+
+func proxyHandler(w *response.Writer, req *request.Request) {
+	w.WriteStatusLine(response.OK)
+	headers := w.GetDefaultHeaders(0)
+	delete(headers, "Content-Length")
+	headers["Transfer-Encoding"] = "chunked"
+	headers["Trailer"] = "X-Content-SHA256,X-Content-Length"
+	w.WriteHeaders(headers)
+	res, err := http.Get("https://httpbin.org" + strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin"))
+	if err != nil {
+		return
+	}
+	var full []byte
+	for true {
+		b := make([]byte, 1024)
+		n, err := res.Body.Read(b)
+		full = append(full, b[:n]...)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if n > 0 {
+					w.WriteChunkedBody(b[:n])
+				}
+				hash := fmt.Sprintf("%x", sha256.Sum256(full))
+				headers["X-Content-SHA256"] = hash
+				headers["X-Content-Length"] = strconv.Itoa(len(full))
+				w.WriteTrailers(headers)
+				break
+			}
+			return
+		}
+		w.WriteChunkedBody(b[:n])
+	}
+
 }
 
 type Handler func(w *response.Writer, req *request.Request)
